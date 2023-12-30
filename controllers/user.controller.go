@@ -11,60 +11,56 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+
 func GetUserById(context *gin.Context) {
 	userID, err := strconv.Atoi(context.Param("id"))
-	if err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "ID pengguna tidak valid"})
+	if ErrorHandling(context, err) {
 		return
 	}
 
 	token := context.GetHeader("Authorization")
 	parsedToken, err := helpers.ParseToken(token)
-	if err != nil {
-		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		context.Abort()
+	if ErrorHandling(context, err) {
 		return
 	}
+
 	if userID != int(parsedToken.ID) {
 		context.JSON(http.StatusUnauthorized, gin.H{"error": "Token tidak sesuai"})
 		context.Abort()
 		return
 	}
+
 	var user models.User
-	if err := config.GetDB().Where("id = ?", parsedToken.ID).First(&user).Error; err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Pengguna tidak ditemukan"})
+	if err := config.GetDB().Where("id = ?", parsedToken.ID).First(&user).Error; ErrorHandling(context, err) {
 		return
 	}
 
-	if err := config.GetDB().First(&user, userID).Error; err != nil {
-		context.JSON(http.StatusNotFound, gin.H{"error": "Pengguna tidak ditemukan"})
+	if err := config.GetDB().First(&user, userID).Error; ErrorHandling(context, err) {
 		return
 	}
 
-	var getUser app.GetUser
-	getUser.ID = user.ID
-	getUser.Username = user.Username
-	getUser.Email = user.Email
+	getUser := app.GetUser{
+		ID:       user.ID,
+		Username: user.Username,
+		Email:    user.Email,
+	}
 
 	context.JSON(http.StatusOK, gin.H{"data": getUser})
 }
 
 
-
 func UpdateUser(context *gin.Context) {
 	userID, err := strconv.Atoi(context.Param("id"))
-	if err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "data pengguna tidak ditemukan"})
-		return
-	}
-	var FormUpdate app.UpdateUser
-	if err := context.ShouldBindJSON(&FormUpdate); err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if ErrorHandling(context, err) {
 		return
 	}
 
-	if _, err := govalidator.ValidateStruct(FormUpdate); err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var FormUpdate app.UpdateUser
+	if err := context.ShouldBindJSON(&FormUpdate); ErrorHandling(context, err) {
+		return
+	}
+
+	if _, err := govalidator.ValidateStruct(FormUpdate); ErrorHandling(context, err) {
 		return
 	}
 
@@ -75,24 +71,13 @@ func UpdateUser(context *gin.Context) {
 		return
 	}
 
-	if err := config.GetDB().Where("email = ? AND id != ?", FormUpdate.Email, userID).First(&user).Error; err == nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Email sudah terdaftar"})
-		context.Abort()
-		return
-	}
-
-	if err := config.GetDB().Where("username = ? AND id != ?", FormUpdate.Username, userID).First(&user).Error; err == nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Username sudah terdaftar"})
-		context.Abort()
+	if err := validateDuplicateEmail(context, FormUpdate.Email, userID); err != nil {
 		return
 	}
 
 	tokenString := context.GetHeader("Authorization")
 	claims, err := helpers.ParseToken(tokenString)
-
-	if err != nil {
-		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		context.Abort()
+	if ErrorHandling(context, err) {
 		return
 	}
 
@@ -102,30 +87,26 @@ func UpdateUser(context *gin.Context) {
 		return
 	}
 
-	if err := config.GetDB().Where("id = ?", claims.ID).First(&user).Error; err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Pengguna tidak ditemukan"})
+	if err := config.GetDB().Where("id = ?", claims.ID).First(&user).Error; ErrorHandling(context, err) {
 		return
 	}
 
-	if err := config.GetDB().First(&user, userID).Error; err != nil {
-		context.JSON(http.StatusNotFound, gin.H{"error": "Pengguna tidak ditemukan"})
+	if err := config.GetDB().First(&user, userID).Error; ErrorHandling(context, err) {
 		return
 	}
 
 	user.Username = FormUpdate.Username
 	user.Email = FormUpdate.Email
-    if FormUpdate.Password != "" {
-        hashedPassword, err := helpers.HashPass(FormUpdate.Password)
-        if err != nil {
-            context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-            context.Abort()
-            return
-        }
-        user.Password = hashedPassword
-    }
 
-	if err := config.GetDB().Save(&user).Error; err != nil {
-		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if FormUpdate.Password != "" {
+		hashedPassword, err := helpers.HashPass(FormUpdate.Password)
+		if ErrorHandling(context, err) {
+			return
+		}
+		user.Password = hashedPassword
+	}
+
+	if err := config.GetDB().Save(&user).Error; ErrorHandling(context, err) {
 		return
 	}
 
@@ -133,21 +114,15 @@ func UpdateUser(context *gin.Context) {
 }
 
 
-
 func DeleteUser(context *gin.Context) {
-	var user models.User
 	userID, err := strconv.Atoi(context.Param("id"))
-	if err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "ID pengguna tidak valid"})
+	if ErrorHandling(context, err) {
 		return
 	}
 
 	token := context.GetHeader("Authorization")
 	parsedToken, err := helpers.ParseToken(token)
-
-	if err != nil {
-		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		context.Abort()
+	if ErrorHandling(context, err) {
 		return
 	}
 
@@ -157,20 +132,28 @@ func DeleteUser(context *gin.Context) {
 		return
 	}
 
-	if err := config.GetDB().Where("id = ?", parsedToken.ID).First(&user).Error; err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Pengguna tidak ditemukan"})
+	var user models.User
+	if err := config.GetDB().Where("id = ?", parsedToken.ID).First(&user).Error; ErrorHandling(context, err) {
 		return
 	}
 
-	if err := config.GetDB().First(&user, userID).Error; err != nil {
-		context.JSON(http.StatusNotFound, gin.H{"error": "Pengguna tidak ditemukan"})
+	if err := config.GetDB().First(&user, userID).Error; ErrorHandling(context, err) {
 		return
 	}
 
-	if err := config.GetDB().Delete(&user).Error; err != nil {
-		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := config.GetDB().Delete(&user).Error; ErrorHandling(context, err) {
 		return
 	}
 
 	context.JSON(http.StatusOK, gin.H{"message": "Data pengguna berhasil terhapus"})
+}
+
+func validateDuplicateEmail(context *gin.Context, email string, userID int) error {
+	var user models.User
+	if err := config.GetDB().Where("email = ? AND id != ?", email, userID).First(&user).Error; err == nil {
+		context.JSON(http.StatusBadRequest, gin.H{"error": "Email sudah terdaftar"})
+		context.Abort()
+		return err
+	}
+	return nil
 }
